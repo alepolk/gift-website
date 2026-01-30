@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Что подарить — Персональный подбор подарков</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Шапка -->
+    <header class="header">
+        <div class="container">
+            <a href="/" class="logo">
+                <span class="logo-icon">🎁</span>
+                <span class="logo-text">ЧТО ПОДАРИТЬ</span>
+            </a>
+            <nav class="nav">
+                <a href="#" class="nav-link">Каталог</a>
+                <a href="#" class="nav-link">О сервисе</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Главный экран -->
+    <main class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <!-- Картинка подарка -->
+                <div class="gift-image">
+                    <img src="{{ url_for('static', filename='gift.png') }}" alt="Подарок">
+                </div>
+
+                <!-- Текст -->
+                <h1 class="hero-title">
+                    Персональный подарок<br>
+                    <span class="highlight">за 1 минуту</span>
+                </h1>
+                
+                <p class="hero-subtitle">
+                    Ответь на несколько вопросов о получателе<br>
+                    подарка и получи наиболее подходящие варианты
+                </p>
+
+                <!-- Кнопка -->
+                <a href="/quiz" class="btn-primary">
+                    Начать подбор подарка
+                </a>
+
+                <p class="hero-note">
+                    Бесплатный сервис · 300+ вариантов подарка
+                </p>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

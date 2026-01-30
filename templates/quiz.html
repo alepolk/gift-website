@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Подбор подарка — Что подарить</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="quiz-page">
+    <!-- Шапка -->
+    <header class="quiz-header">
+        <div class="container">
+            <a href="/" class="back-btn">← Назад</a>
+            <span class="progress-text" id="progressText">Вопрос 1 из 10</span>
+        </div>
+    </header>
+
+    <!-- Прогресс-бар -->
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 10%"></div>
+    </div>
+
+    <!-- Контент -->
+    <main class="quiz-content">
+        <div class="container">
+            <!-- Обычные вопросы -->
+            <div id="questionContainer">
+                <div class="question-icon" id="questionIcon">💰</div>
+                <h2 class="question-text" id="questionText">Загрузка...</h2>
+                <div class="options" id="optionsContainer"></div>
+            </div>
+
+            <!-- Интересы (множественный выбор) -->
+            <div id="interestsContainer" style="display: none;">
+                <div class="question-icon">🎯</div>
+                <h2 class="question-text">Какие увлечения есть у получателя?</h2>
+                <p style="color: #64748b; margin-bottom: 24px; font-size: 14px;">Выбери все подходящие</p>
+                <div class="interests-grid" id="interestsGrid"></div>
+                <div class="interests-actions">
+                    <button class="btn-secondary" id="skipInterests">Не знаю увлечений</button>
+                    <button class="btn-submit" id="submitInterests">Показать подарки</button>
+                </div>
+            </div>
+
+            <!-- Загрузка результатов -->
+            <div id="loadingContainer" style="display: none;">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Подбираем лучшие подарки...</p>
+                </div>
+            </div>
+
+            <!-- Результаты -->
+            <div id="resultsContainer" style="display: none;"></div>
+        </div>
+    </main>
+
+    <script>
+        // Данные вопросов
+        const questions = {{ questions | tojson }};
+        
+        let currentQuestion = 0;
+        let answers = [];
+        let selectedInterests = [];
+        let allGifts = [];
+        let displayedGifts = 0;
+        let gender = 'gender_male';
+        let age = 'age_26_35';
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', () => {
+            showQuestion(0);
+        });
+
+        // Показать вопрос
+        function showQuestion(index) {
+            if (index >= questions.length) {
+                showInterests();
+                return;
+            }
+
+            const q = questions[index];
+            currentQuestion = index;
+
+            document.getElementById('progressText').textContent = `Вопрос ${index + 1} из 10`;
+            document.getElementById('progressFill').style.width = `${(index + 1) * 10}%`;
+            document.getElementById('questionIcon').textContent = q.icon;
+            document.getElementById('questionText').textContent = q.text;
+
+            const container = document.getElementById('optionsContainer');
+            container.innerHTML = '';
+
+            q.options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'option';
+                btn.textContent = opt.text;
+                btn.onclick = () => selectOption(q, opt.value);
+                container.appendChild(btn);
+            });
+        }
+
+        // Выбор ответа
+        function selectOption(question, value) {
+            // Сохраняем пол и возраст для интересов
+            if (question.tag === 'gender') {
+                gender = value;
+            }
+            if (question.tag === 'age') {
+                age = value;
+            }
+
+            answers.push({
+                tag: question.tag,
+                value: value
+            });
+
+            // Следующий вопрос
+            showQuestion(currentQuestion + 1);
+        }
+
+        // Показать интересы
+        async function showInterests() {
+            document.getElementById('questionContainer').style.display = 'none';
+            document.getElementById('interestsContainer').style.display = 'block';
+            document.getElementById('progressText').textContent = 'Вопрос 10 из 10';
+            document.getElementById('progressFill').style.width = '100%';
+
+            // Загружаем интересы по полу и возрасту
+            const response = await fetch(`/api/interests?gender=${gender}&age=${age}`);
+            const interests = await response.json();
+
+            const grid = document.getElementById('interestsGrid');
+            grid.innerHTML = '';
+
+            interests.forEach(int => {
+                const btn = document.createElement('button');
+                btn.className = 'interest-option';
+                btn.textContent = int.text;
+                btn.dataset.value = int.value;
+                btn.onclick = () => toggleInterest(btn, int.value);
+                grid.appendChild(btn);
+            });
+        }
+
+        // Переключить интерес
+        function toggleInterest(btn, value) {
+            btn.classList.toggle('selected');
+            
+            if (selectedInterests.includes(value)) {
+                selectedInterests = selectedInterests.filter(i => i !== value);
+            } else {
+                selectedInterests.push(value);
+            }
+        }
+
+        // Пропустить интересы
+        document.getElementById('skipInterests').onclick = () => {
+            selectedInterests = [];
+            getResults();
+        };
+
+        // Отправить и получить результаты
+        document.getElementById('submitInterests').onclick = () => {
+            getResults();
+        };
+
+        // Получить результаты
+        async function getResults() {
+            document.getElementById('interestsContainer').style.display = 'none';
+            document.getElementById('loadingContainer').style.display = 'block';
+
+            const response = await fetch('/api/results', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    answers: answers,
+                    interests: selectedInterests
+                })
+            });
+
+            allGifts = await response.json();
+            displayedGifts = 0;
+
+            setTimeout(() => {
+                document.getElementById('loadingContainer').style.display = 'none';
+                showResults();
+            }, 1000);
+        }
+
+        // Показать результаты
+        function showResults() {
+            const container = document.getElementById('resultsContainer');
+            container.style.display = 'block';
+
+            if (allGifts.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 40px 0;">
+                        <p style="font-size: 18px; margin-bottom: 20px;">😔 К сожалению, не нашлось подходящих подарков</p>
+                        <a href="/quiz" class="btn-restart">Попробовать снова</a>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div class="results-header" style="background: transparent; border: none; padding: 0 0 20px;">
+                    <h1 class="results-title">🎁 Подобрали ${allGifts.length} подарков</h1>
+                    <p class="results-subtitle">Вот лучшие варианты для вас</p>
+                </div>
+                <div id="giftsContainer"></div>
+            `;
+
+            container.innerHTML = html;
+            loadMoreGifts();
+        }
+
+        // Загрузить ещё подарки
+        function loadMoreGifts() {
+            const container = document.getElementById('giftsContainer');
+            const giftsToShow = allGifts.slice(displayedGifts, displayedGifts + 5);
+            
+            giftsToShow.forEach(gift => {
+                const card = document.createElement('div');
+                card.className = 'gift-card';
+                card.innerHTML = `
+                    <div class="gift-card-header">
+                        <span class="gift-name">${gift.name}</span>
+                        <span class="gift-price">${gift.price}</span>
+                    </div>
+                    ${gift.description ? `<p class="gift-description">${gift.description}</p>` : ''}
+                `;
+                container.appendChild(card);
+            });
+
+            displayedGifts += giftsToShow.length;
+
+            // Удаляем старую кнопку
+            const oldBtn = document.getElementById('loadMoreBtn');
+            if (oldBtn) oldBtn.remove();
+
+            const oldRestart = document.getElementById('restartSection');
+            if (oldRestart) oldRestart.remove();
+
+            // Добавляем кнопку "Показать ещё" если есть ещё подарки
+            if (displayedGifts < allGifts.length) {
+                const loadMore = document.createElement('div');
+                loadMore.className = 'load-more';
+                loadMore.id = 'loadMoreBtn';
+                loadMore.innerHTML = `
+                    <button class="btn-load-more" onclick="loadMoreGifts()">
+                        Показать ещё ${Math.min(5, allGifts.length - displayedGifts)} из ${allGifts.length - displayedGifts}
+                    </button>
+                `;
+                container.after(loadMore);
+            }
+
+            // Кнопка начать заново
+            const restart = document.createElement('div');
+            restart.className = 'restart-section';
+            restart.id = 'restartSection';
+            restart.innerHTML = `<a href="/quiz" class="btn-restart">🔄 Начать заново</a>`;
+            document.getElementById('resultsContainer').appendChild(restart);
+        }
+    </script>
+</body>
+</html>
