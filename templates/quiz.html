@@ -67,6 +67,8 @@
         let displayedGifts = 0;
         let gender = 'gender_male';
         let age = 'age_26_35';
+        let sessionId = null;
+        let ratedGifts = {}; // Хранит оценки: {gift_id: rating}
 
         // Инициализация
         document.addEventListener('DOMContentLoaded', () => {
@@ -179,13 +181,51 @@
                 })
             });
 
-            allGifts = await response.json();
+            const data = await response.json();
+            allGifts = data.gifts;
+            sessionId = data.session_id;
             displayedGifts = 0;
 
             setTimeout(() => {
                 document.getElementById('loadingContainer').style.display = 'none';
                 showResults();
             }, 1000);
+        }
+
+        // Оценить подарок
+        async function rateGift(giftId, giftName, rating) {
+            // Обновляем UI
+            ratedGifts[giftId] = rating;
+            updateRatingButtons(giftId, rating);
+            
+            // Отправляем на сервер
+            await fetch('/api/rate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    gift_id: giftId,
+                    gift_name: giftName,
+                    rating: rating
+                })
+            });
+        }
+
+        // Обновить кнопки оценки
+        function updateRatingButtons(giftId, rating) {
+            const card = document.querySelector(`[data-gift-id="${giftId}"]`);
+            if (!card) return;
+
+            const likeBtn = card.querySelector('.btn-like');
+            const dislikeBtn = card.querySelector('.btn-dislike');
+
+            likeBtn.classList.remove('active');
+            dislikeBtn.classList.remove('active');
+
+            if (rating === 1) {
+                likeBtn.classList.add('active');
+            } else if (rating === -1) {
+                dislikeBtn.classList.add('active');
+            }
         }
 
         // Показать результаты
@@ -206,7 +246,7 @@
             let html = `
                 <div class="results-header" style="background: transparent; border: none; padding: 0 0 20px;">
                     <h1 class="results-title">🎁 Подобрали ${allGifts.length} подарков</h1>
-                    <p class="results-subtitle">Вот лучшие варианты для вас</p>
+                    <p class="results-subtitle">Оцени варианты — это поможет улучшить подбор</p>
                 </div>
                 <div id="giftsContainer"></div>
             `;
@@ -215,22 +255,38 @@
             loadMoreGifts();
         }
 
+        // Создать карточку подарка
+        function createGiftCard(gift) {
+            const currentRating = ratedGifts[gift.id] || 0;
+            const likeActive = currentRating === 1 ? 'active' : '';
+            const dislikeActive = currentRating === -1 ? 'active' : '';
+
+            return `
+                <div class="gift-card" data-gift-id="${gift.id}">
+                    <div class="gift-card-header">
+                        <span class="gift-name">${gift.name}</span>
+                        <span class="gift-price">${gift.price}</span>
+                    </div>
+                    ${gift.description ? `<p class="gift-description">${gift.description}</p>` : ''}
+                    <div class="gift-rating">
+                        <button class="btn-rate btn-like ${likeActive}" onclick="rateGift(${gift.id}, '${gift.name.replace(/'/g, "\\'")}', 1)">
+                            👍 Нравится
+                        </button>
+                        <button class="btn-rate btn-dislike ${dislikeActive}" onclick="rateGift(${gift.id}, '${gift.name.replace(/'/g, "\\'")}', -1)">
+                            👎 Не подходит
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
         // Загрузить ещё подарки
         function loadMoreGifts() {
             const container = document.getElementById('giftsContainer');
             const giftsToShow = allGifts.slice(displayedGifts, displayedGifts + 5);
             
             giftsToShow.forEach(gift => {
-                const card = document.createElement('div');
-                card.className = 'gift-card';
-                card.innerHTML = `
-                    <div class="gift-card-header">
-                        <span class="gift-name">${gift.name}</span>
-                        <span class="gift-price">${gift.price}</span>
-                    </div>
-                    ${gift.description ? `<p class="gift-description">${gift.description}</p>` : ''}
-                `;
-                container.appendChild(card);
+                container.insertAdjacentHTML('beforeend', createGiftCard(gift));
             });
 
             displayedGifts += giftsToShow.length;

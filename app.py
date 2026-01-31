@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request, jsonify, session
 from scoring import get_top_gifts
+from analytics import (
+    create_session, save_answers, save_rating, 
+    save_event, complete_session
+)
 import secrets
 
 app = Flask(__name__)
@@ -193,7 +197,11 @@ def index():
 
 @app.route('/quiz')
 def quiz():
-    session['answers'] = {}
+    # Создаём сессию аналитики
+    session_id = create_session(source="web")
+    session['analytics_session_id'] = session_id
+    save_event(session_id, "quiz_start")
+    
     return render_template('quiz.html', questions=QUESTIONS)
 
 
@@ -213,6 +221,7 @@ def get_interests():
 @app.route('/api/results', methods=['POST'])
 def get_results():
     data = request.json
+    session_id = session.get('analytics_session_id')
     
     # Формируем фильтры
     filters = {}
@@ -249,13 +258,66 @@ def get_results():
             value_weights['gift_aesthetic'] = float(value)
     
     # Обрабатываем интересы
-    for interest in data.get('interests', []):
+    interests_list = data.get('interests', [])
+    for interest in interests_list:
         interest_weights[interest] = 1.0
     
-    # Получаем результаты
-    gifts = get_top_gifts(filters, value_weights, interest_weights, limit=50)
+    # Сохраняем ответы в аналитику
+    if session_id:
+        save_answers(
+            session_id=session_id,
+            filters=filters,
+            value_weights=value_weights,
+            interests=interests_list
+        )
+        save_event(session_id, "results_requested")
     
-    return jsonify(gifts)
+    # Сохраняем session_id в ответе для использования при оценках
+    session['filters'] = filters
+    
+    # Получаем результаты
+    gifts = get_top_gifts(filters, value_weights, interest_weights, limit=100)
+    
+    if session_id:
+        save_event(session_id, "results_loaded", {"count": len(gifts)})
+    
+    return jsonify({
+        'gifts': gifts,
+        'session_id': session_id
+    })
+
+
+@app.route('/api/rate', methods=['POST'])
+def rate_gift():
+    """Сохраняет оценку подарка"""
+    data = request.json
+    session_id = session.get('analytics_session_id')
+    
+    if not session_id:
+        return jsonify({'error': 'No session'}), 400
+    
+    gift_id = data.get('gift_id')
+    gift_name = data.get('gift_name')
+    rating = data.get('rating')  # 1 = like, -1 = dislike
+    
+    save_rating(session_id, gift_id, gift_name, rating)
+    
+    event_type = "like" if rating == 1 else "dislike"
+    save_event(session_id, event_type, {"gift_id": gift_id, "gift_name": gift_name})
+    
+    return jsonify({'success': True})
+
+
+@app.route('/api/complete', methods=['POST'])
+def complete():
+    """Завершает сессию"""
+    session_id = session.get('analytics_session_id')
+    
+    if session_id:
+        complete_session(session_id)
+        save_event(session_id, "completed")
+    
+    return jsonify({'success': True})
 
 
 if __name__ == '__main__':

@@ -1,30 +1,86 @@
 import sqlite3
 
 DB_PATH = "gifts.db"
+ANALYTICS_DB_PATH = "analytics.db"
 
 # Порядок бюджетов
 BUDGET_ORDER = ["budget_2000", "budget_5000", "budget_10000", "budget_15000",
                 "budget_20000", "budget_30000", "budget_50000", "budget_100000"]
 
 
+def get_collaborative_score(gift_id: int, filters: dict) -> float:
+    """
+    Рассчитывает бонус на основе лайков похожих пользователей.
+    
+    Ищет сессии с похожим профилем (пол, возраст, повод) и смотрит их оценки.
+    """
+    try:
+        conn = sqlite3.connect(ANALYTICS_DB_PATH)
+        cursor = conn.cursor()
+        
+        # Находим похожие сессии (совпадение по gender, age, occasion)
+        cursor.execute('''
+            SELECT a.session_id 
+            FROM answers a
+            WHERE a.gender = ? 
+              AND a.age = ?
+              AND a.occasion = ?
+        ''', (
+            filters.get('gender'),
+            filters.get('age'),
+            filters.get('occasion')
+        ))
+        
+        similar_sessions = [row[0] for row in cursor.fetchall()]
+        
+        if not similar_sessions:
+            conn.close()
+            return 0.0
+        
+        # Считаем лайки и дизлайки этого подарка
+        placeholders = ','.join(['?' for _ in similar_sessions])
+        cursor.execute(f'''
+            SELECT 
+                SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as likes,
+                SUM(CASE WHEN rating = -1 THEN 1 ELSE 0 END) as dislikes
+            FROM ratings
+            WHERE session_id IN ({placeholders}) AND gift_id = ?
+        ''', similar_sessions + [gift_id])
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        likes = row[0] or 0
+        dislikes = row[1] or 0
+        
+        total = likes + dislikes
+        if total == 0:
+            return 0.0
+        
+        # Рассчитываем скор от -1 до +1
+        score = (likes - dislikes) / total
+        
+        # Учитываем количество оценок (больше оценок = больше доверия)
+        confidence = min(total / 10, 1.0)  # Максимум при 10+ оценках
+        
+        return score * confidence * 3.0  # До ±3 баллов
+        
+    except Exception as e:
+        # Если база аналитики не существует — возвращаем 0
+        return 0.0
+
+
 def calculate_budget_score(user_max_budget: str, gift_budget_tags: str) -> float:
     """
     Рассчитывает баллы за соответствие бюджета.
-    
-    Логика:
-    - Если бюджет юзера попадает в нижнюю границу диапазона товара → штраф
-    - Если в середину → нейтрально
-    - Если в верхнюю границу → бонус
     """
     if not user_max_budget or not gift_budget_tags:
         return 0.0
     
-    # Индекс бюджета пользователя
     if user_max_budget not in BUDGET_ORDER:
         return 0.0
     user_index = BUDGET_ORDER.index(user_max_budget)
     
-    # Находим диапазон бюджета товара
     gift_indices = []
     for i, tag in enumerate(BUDGET_ORDER):
         if tag in gift_budget_tags:
@@ -36,47 +92,36 @@ def calculate_budget_score(user_max_budget: str, gift_budget_tags: str) -> float
     gift_min_index = min(gift_indices)
     gift_max_index = max(gift_indices)
     
-    # Если бюджет юзера ниже минимума товара — товар не подходит (отсеется фильтром)
     if user_index < gift_min_index:
         return -10.0
     
-    # Если бюджет юзера выше максимума товара — товар дешевле чем юзер готов потратить
     if user_index > gift_max_index:
-        # Чем больше разница, тем меньше баллов (слишком дёшево для бюджета)
         diff = user_index - gift_max_index
         if diff == 1:
-            return 0.5  # Немного дешевле — ок
+            return 0.5
         elif diff == 2:
-            return 0.0  # Заметно дешевле — нейтрально
+            return 0.0
         else:
-            return -0.5 * (diff - 2)  # Сильно дешевле — штраф
+            return -0.5 * (diff - 2)
     
-    # Бюджет юзера внутри диапазона товара
     if gift_max_index == gift_min_index:
-        # Товар с одним бюджетом — точное попадание
         return 2.0
     
-    # Рассчитываем позицию в диапазоне (0 = нижняя граница, 1 = верхняя)
     position = (user_index - gift_min_index) / (gift_max_index - gift_min_index)
     
-    # Преобразуем позицию в баллы
-    # position = 0 → -1.0 балл (нижняя граница, товар скорее дороже)
-    # position = 0.5 → +0.5 балл (середина)
-    # position = 1 → +2.0 балла (верхняя граница, идеальное попадание)
-    
     if position <= 0.25:
-        return -1.0  # Нижняя граница — штраф
+        return -1.0
     elif position <= 0.5:
-        return 0.0   # Ниже середины — нейтрально
+        return 0.0
     elif position <= 0.75:
-        return 1.0   # Выше середины — хорошо
+        return 1.0
     else:
-        return 2.0   # Верхняя граница — отлично
+        return 2.0
 
 
 def filter_and_score_gifts(filters: dict, value_weights: dict, interest_weights: dict):
     """
-    Фильтрует подарки по PRIMARY тегам и считает score по VALUE/INTERESTS
+    Фильтрует подарки по PRIMARY тегам и считает score по VALUE/INTERESTS + ЛАЙКИ
     """
     
     conn = sqlite3.connect(DB_PATH)
@@ -102,28 +147,23 @@ def filter_and_score_gifts(filters: dict, value_weights: dict, interest_weights:
         
         # === PRIMARY ФИЛЬТРАЦИЯ ===
         
-        # Бюджет (хотя бы один тег должен совпасть)
         if 'budget' in filters:
             budget_match = any(b in budget_tags for b in filters['budget'])
             if not budget_match:
                 continue
         
-        # Пол
         if 'gender' in filters:
             if filters['gender'] not in gender_tags:
                 continue
         
-        # Возраст
         if 'age' in filters:
             if filters['age'] not in age_tags:
                 continue
         
-        # Отношения
         if 'relationship' in filters:
             if filters['relationship'] not in relationship_tags:
                 continue
         
-        # Повод
         if 'occasion' in filters:
             if filters['occasion'] not in occasion_tags:
                 continue
@@ -157,9 +197,9 @@ def filter_and_score_gifts(filters: dict, value_weights: dict, interest_weights:
         # === SCORING ===
         score = 0.0
         
-        # 0. БЮДЖЕТ — умный расчёт баллов
+        # 0. БЮДЖЕТ
         if 'budget' in filters and filters['budget']:
-            user_max_budget = filters['budget'][-1]  # Последний = максимальный
+            user_max_budget = filters['budget'][-1]
             budget_score = calculate_budget_score(user_max_budget, budget_tags)
             score += budget_score
         
@@ -196,7 +236,7 @@ def filter_and_score_gifts(filters: dict, value_weights: dict, interest_weights:
             if gift_aesthetic < 0.3:
                 score -= 0.5
         
-        # 4. INTERESTS — главный множитель!
+        # 4. INTERESTS
         interest_bonus = 0.0
         interest_matches = 0
         
@@ -214,13 +254,18 @@ def filter_and_score_gifts(filters: dict, value_weights: dict, interest_weights:
         if interest_matches >= 3:
             score += 1.5
         
+        # 5. КОЛЛАБОРАТИВНАЯ ФИЛЬТРАЦИЯ — лайки похожих пользователей
+        collaborative_score = get_collaborative_score(gift_id, filters)
+        score += collaborative_score
+        
         results.append({
             'id': gift_id,
             'name': name,
             'price': price,
             'description': description,
             'score': score,
-            'interest_matches': interest_matches
+            'interest_matches': interest_matches,
+            'collaborative_score': collaborative_score
         })
     
     # Сортируем по score
@@ -233,33 +278,3 @@ def get_top_gifts(filters: dict, value_weights: dict, interest_weights: dict, li
     """Возвращает топ-N подарков"""
     results = filter_and_score_gifts(filters, value_weights, interest_weights)
     return results[:limit]
-
-
-# === ТЕСТ ===
-if __name__ == "__main__":
-    print("=" * 60)
-    print("ТЕСТ: Бюджет 10к — товары 10-50к должны быть ВНИЗУ")
-    print("=" * 60)
-    
-    # Товар с диапазоном 10к-50к
-    test_tags = "budget_10000, budget_15000, budget_20000, budget_30000, budget_50000"
-    
-    print(f"\nТовар: {test_tags}")
-    print()
-    
-    for budget in BUDGET_ORDER:
-        score = calculate_budget_score(budget, test_tags)
-        print(f"Юзер {budget}: {score:+.1f} баллов")
-    
-    print()
-    print("=" * 60)
-    print("ТЕСТ: Товар 2к-5к")
-    print("=" * 60)
-    
-    test_tags2 = "budget_2000, budget_5000"
-    print(f"\nТовар: {test_tags2}")
-    print()
-    
-    for budget in BUDGET_ORDER:
-        score = calculate_budget_score(budget, test_tags2)
-        print(f"Юзер {budget}: {score:+.1f} баллов")

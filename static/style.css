@@ -349,6 +349,57 @@ body {
     font-size: 14px;
     color: #64748b;
     line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+/* Кнопки оценки */
+.gift-rating {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-rate {
+    flex: 1;
+    padding: 10px 16px;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.btn-rate:hover {
+    border-color: #94a3b8;
+}
+
+.btn-like:hover {
+    border-color: #22c55e;
+    background: #f0fdf4;
+    color: #16a34a;
+}
+
+.btn-like.active {
+    border-color: #22c55e;
+    background: #22c55e;
+    color: white;
+}
+
+.btn-dislike:hover {
+    border-color: #ef4444;
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.btn-dislike.active {
+    border-color: #ef4444;
+    background: #ef4444;
+    color: white;
 }
 
 /* Кнопка "Показать ещё" */
@@ -430,5 +481,9 @@ body {
     
     .interests-grid {
         grid-template-columns: 1fr;
+    }
+    
+    .gift-rating {
+        flex-direction: column;
     }
 }
